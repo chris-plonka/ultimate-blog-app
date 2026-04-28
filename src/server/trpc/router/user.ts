@@ -1,199 +1,328 @@
 import { z } from "zod";
-import { protectedProcedure, publicProcedure, router } from "../trpc";
+import { router, publicProcedure, protectedProcedure } from "../trpc";
 import isDataURI from "validator/lib/isDataURI";
+import { decode } from "base64-arraybuffer";
 import { createClient } from "@supabase/supabase-js";
 import { env } from "../../../env/server.mjs";
-import mime from "mime-types";
-import { randomUUID } from "crypto";
+import { TRPCError } from "@trpc/server";
 
-const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SECRET_KEY);
+const supabase = createClient(env.SUPABASE_PUBLIC_URL, env.SUPABASE_SECRET_KEY);
 
 export const userRouter = router({
-  uploadAvatar: protectedProcedure
-    .input(
-      z.object({
-        imageBase64DataURI: z
-          .string()
-          .refine(
-            (val) => isDataURI(val),
-            "image should be in data uri format"
-          ),
-        mimetype: z.string(),
-      })
-    )
-    .mutation(
-      async ({
-        ctx: { prisma, session },
-        input: { imageBase64DataURI, mimetype },
-      }) => {
-        // `image` here is a base64 encoded data URI, it is NOT a base64 string, so we need to extract
-        // the real base64 string from it.
-        // Check the syntax here: https://en.wikipedia.org/wiki/Data_URI_scheme#Syntax
-        const imageBase64Str = imageBase64DataURI.replace(/^.+,/, "");
-
-        const buf = Buffer.from(imageBase64Str, "base64");
-
-        const { data: previousImageData } = await supabase.storage
-          .from("images")
-          .list("avatars", {
-            search: session.user.username,
-          });
-
-        if (previousImageData)
-          await supabase.storage
-            .from("images")
-            .remove(previousImageData?.map((data) => `avatars/${data.name}`));
-
-        const { data: uploadedImage, error } = await supabase.storage
-          .from("images")
-          .upload(
-            `avatars/${session.user.username}-${randomUUID()}.${mime.extension(
-              mimetype
-            )}`,
-            buf,
-            {
-              cacheControl: "3600",
-              upsert: true,
-              contentType: mimetype,
-            }
-          );
-
-        if (!error) {
-          const {
-            data: { publicUrl },
-          } = supabase.storage.from("images").getPublicUrl(uploadedImage.path);
-
-          await prisma.user.update({
-            where: {
-              id: session.user.id,
-            },
-            data: {
-              image: publicUrl,
-            },
-          });
-        }
-      }
-    ),
-  getCurrentUser: protectedProcedure.query(
-    async ({ ctx: { session, prisma } }) => {
-      return await prisma.user.findUnique({
-        where: {
-          id: session.user.id,
-        },
-        select: {
-          email: true,
-          username: true,
-          image: true,
-          id: true,
-          name: true,
-        },
-      });
-    }
-  ),
   getUserProfile: publicProcedure
     .input(
       z.object({
         username: z.string(),
       })
     )
-    .query(async ({ ctx: { prisma }, input: { username } }) => {
+    .query(async ({ ctx: { prisma, session }, input: { username } }) => {
+      return await prisma.user.findUnique({
+        where: {
+          username: username,
+        },
+        select: {
+          name: true,
+          image: true,
+          id: true,
+          username: true,
+          _count: {
+            select: {
+              posts: true,
+              followedBy: true,
+              followings: true,
+            },
+          },
+          followedBy: session?.user?.id
+            ? {
+                where: {
+                  id: session.user.id,
+                },
+              }
+            : false,
+        },
+      });
+    }),
+
+  getUserPosts: publicProcedure
+    .input(
+      z.object({
+        username: z.string(),
+      })
+    )
+    .query(async ({ ctx: { prisma, session }, input: { username } }) => {
       return await prisma.user.findUnique({
         where: {
           username,
         },
         select: {
-          name: true,
-          username: true,
-          image: true,
-          _count: {
+          posts: {
             select: {
-              followers: true,
-              followings: true,
-              posts: true,
+              id: true,
+              slug: true,
+              title: true,
+              description: true,
+              createdAt: true,
+              featuredImage: true,
+              author: {
+                select: {
+                  name: true,
+                  image: true,
+                  username: true,
+                },
+              },
+              bookmarks: session?.user?.id
+                ? {
+                    where: {
+                      userId: session?.user?.id,
+                    },
+                  }
+                : false,
+              tags: {
+                select: {
+                  name: true,
+                  id: true,
+                  slug: true,
+                },
+              },
             },
           },
-          id: true,
         },
       });
     }),
-  getUserReadingList: protectedProcedure.query(
+
+  uploadAvatar: protectedProcedure
+    .input(
+      z.object({
+        imageAsDataUrl: z.string().refine((val) => isDataURI(val)),
+        username: z.string(),
+      })
+    )
+    .mutation(async ({ ctx: { prisma, session }, input }) => {
+      // make a function which which grab the user from db using the username and check if it's id is equal to the session user id
+
+      // `image` here is a base64 encoded data URI, it is NOT a base64 string, so we need to extract
+      // the real base64 string from it.
+      // Check the syntax here: https://en.wikipedia.org/wiki/Data_URI_scheme#Syntax
+      // remove the "data:image/jpeg;base64,"
+      const imageBase64Str = input.imageAsDataUrl.replace(/^.+,/, "");
+
+      const { data, error } = await supabase.storage
+        .from("public")
+        .upload(`avatars/${input.username}.png`, decode(imageBase64Str), {
+          contentType: "image/png",
+          upsert: true,
+        });
+
+      if (error) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "upload failed to supabase",
+        });
+      }
+      const {
+        data: { publicUrl },
+      } = supabase.storage.from("public").getPublicUrl(data?.path);
+
+      await prisma.user.update({
+        where: {
+          id: session.user.id,
+        },
+        data: {
+          image: publicUrl,
+        },
+      });
+    }),
+
+  getSuggestions: protectedProcedure.query(
     async ({ ctx: { prisma, session } }) => {
-      const userReadingList = await prisma.bookmark.findMany({
+      // we need an array of users, those users should liked or bookmarked the same posts, that the current user did
+
+      // get likes and bookmarks from current user -> extract tags -> find people who liked or bookmarked those posts which are having the extracted tags
+
+      const tagsQuery = {
         where: {
           userId: session.user.id,
         },
-        orderBy: {
-          createdAt: "desc",
-        },
-        take: 4,
-        include: {
+        select: {
           post: {
             select: {
-              featuredImage: true,
-              title: true,
-              description: true,
-              slug: true,
-              author: {
+              tags: {
                 select: {
-                  image: true,
                   name: true,
                 },
               },
-              createdAt: true,
             },
           },
         },
+        take: 10,
+      };
+
+      const likedPostTags = await prisma.like.findMany(tagsQuery);
+      const bookmarkedPostTags = await prisma.bookmark.findMany(tagsQuery);
+
+      const interestedTags: string[] = [];
+
+      likedPostTags.forEach((like) => {
+        interestedTags.push(...like.post.tags.map((tag) => tag.name));
       });
 
-      return userReadingList;
-    }
-  ),
-  getUserPosts: publicProcedure
-    .input(z.object({ userId: z.string() }))
-    .query(async ({ input: { userId }, ctx: { prisma } }) => {
-      const userPosts = await prisma.post.findMany({
+      bookmarkedPostTags.forEach((bookmark) => {
+        interestedTags.push(...bookmark.post.tags.map((tag) => tag.name));
+      });
+
+      const suggestions = await prisma.user.findMany({
         where: {
-          authorId: userId,
+          OR: [
+            {
+              likes: {
+                some: {
+                  post: {
+                    tags: {
+                      some: {
+                        name: {
+                          in: interestedTags,
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            {
+              bookmarks: {
+                some: {
+                  post: {
+                    tags: {
+                      some: {
+                        name: {
+                          in: interestedTags,
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          ],
+          NOT: {
+            id: session.user.id,
+          },
         },
         select: {
-          title: true,
-          description: true,
-          slug: true,
-          featuredImage: true,
-          createdAt: true,
-          tags: true,
           id: true,
-          bookmarks: userId
-            ? {
-                where: {
-                  userId,
-                },
-              }
-            : false,
-          author: {
-            select: {
-              name: true,
-              image: true,
-              username: true,
+          name: true,
+          image: true,
+          username: true,
+        },
+        take: 4,
+      });
+
+      return suggestions;
+    }
+  ),
+
+  followUser: protectedProcedure
+    .input(
+      z.object({
+        followingUserId: z.string(),
+      })
+    )
+    .mutation(
+      async ({ ctx: { prisma, session }, input: { followingUserId } }) => {
+        if (followingUserId === session.user.id) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "you can't follow yourself",
+          });
+        }
+
+        await prisma.user.update({
+          where: {
+            id: session.user.id,
+          },
+          data: {
+            followings: {
+              connect: {
+                id: followingUserId,
+              },
             },
           },
-          likes: userId
-            ? {
-                where: {
-                  userId,
-                },
-              }
-            : false,
-          _count: {
+        });
+      }
+    ),
+
+  unfollowUser: protectedProcedure
+    .input(
+      z.object({
+        followingUserId: z.string(),
+      })
+    )
+    .mutation(
+      async ({ ctx: { prisma, session }, input: { followingUserId } }) => {
+        await prisma.user.update({
+          where: {
+            id: session.user.id,
+          },
+          data: {
+            followings: {
+              disconnect: {
+                id: followingUserId,
+              },
+            },
+          },
+        });
+      }
+    ),
+
+  getAllFollowers: protectedProcedure
+    .input(
+      z.object({
+        userId: z.string(),
+      })
+    )
+    .query(async ({ ctx: { prisma, session }, input: { userId } }) => {
+      return await prisma.user.findUnique({
+        where: {
+          id: userId,
+        },
+        select: {
+          followedBy: {
             select: {
-              bookmarks: true,
-              comments: true,
-              likes: true,
+              name: true,
+              username: true,
+              id: true,
+              image: true,
+              followedBy: {
+                where: {
+                  id: session.user.id,
+                },
+              },
             },
           },
         },
       });
-
-      return userPosts;
+    }),
+  getAllFollowing: protectedProcedure
+    .input(
+      z.object({
+        userId: z.string(),
+      })
+    )
+    .query(async ({ ctx: { prisma, session }, input: { userId } }) => {
+      return await prisma.user.findUnique({
+        where: {
+          id: userId,
+        },
+        select: {
+          followings: {
+            select: {
+              name: true,
+              username: true,
+              id: true,
+              image: true,
+            },
+          },
+        },
+      });
     }),
 });
