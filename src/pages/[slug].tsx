@@ -1,166 +1,151 @@
 import { useRouter } from "next/router";
-import React, { useEffect, useState } from "react";
-import { BiEdit } from "react-icons/bi";
-import MainLayout from "../Layouts/MainLayout";
+import React, { useCallback, useState } from "react";
+import { AiOutlineLoading3Quarters } from "react-icons/ai";
+import { BsChat } from "react-icons/bs";
+import MainLayout from "../layouts/MainLayout";
 import { trpc } from "../utils/trpc";
-import UnsplashGallary from "../components/UnsplashGallary";
-import Image from "next/image";
 import { FcLike, FcLikePlaceholder } from "react-icons/fc";
-import { HiOutlineChatBubbleOvalLeft } from "react-icons/hi2";
+import CommentSidebar from "../components/CommentSidebar";
+import { BiImageAdd } from "react-icons/bi";
+import UnsplashGallary from "../components/UnsplashGallary";
 import { useSession } from "next-auth/react";
-import { BsThreeDots } from "react-icons/bs";
-import CommentsSidebar from "../components/CommetsSidebar";
+import Image from "next/image";
 import { Interweave } from "interweave";
 
-const BlogPage = () => {
-  const { query } = useRouter();
-  const utils = trpc.useContext();
-  const { data: sessionData } = useSession();
+const PostPage = () => {
+  const router = useRouter();
 
-  const {
-    data: blog,
-    isLoading,
-    isError,
-    isSuccess,
-  } = trpc.post.getPost.useQuery(
-    { slug: query.slug as string, userId: sessionData?.user?.id },
+  const { data } = useSession();
+
+  const postRoute = trpc.useContext().post;
+
+  const getPost = trpc.post.getPost.useQuery(
     {
-      enabled: !!query.slug,
+      slug: router.query.slug as string,
+    },
+    {
+      enabled: Boolean(router.query.slug),
     }
   );
 
-  const [{ isLiked, likesCount }, setLikesObject] = useState({
-    isLiked: Boolean(blog?.likes && blog.likes.length > 0),
-    likesCount: blog?._count.likes ?? 0,
-  });
-
-  useEffect(() => {
-    setLikesObject({
-      isLiked: Boolean(blog?.likes && blog.likes.length > 0),
-      likesCount: blog?._count.likes ?? 0,
-    });
-  }, [blog]);
+  const invalidateCurrentPostPage = useCallback(() => {
+    postRoute.getPost.invalidate({ slug: router.query.slug as string });
+  }, [postRoute.getPost, router.query.slug]);
 
   const likePost = trpc.post.likePost.useMutation({
     onSuccess: () => {
-      setLikesObject(({ likesCount }) => ({
-        isLiked: true,
-        likesCount: likesCount + 1,
-      }));
-      utils.post.getPost.invalidate({
-        slug: query.slug as string,
-        userId: sessionData?.user?.id,
-      });
+      invalidateCurrentPostPage();
     },
   });
-  const dislikePost = trpc.post.dislikePost.useMutation({
+
+  const dislikePost = trpc.post.disLikePost.useMutation({
     onSuccess: () => {
-      setLikesObject(({ likesCount }) => ({
-        isLiked: false,
-        likesCount: likesCount - 1,
-      }));
-      utils.post.getPost.invalidate({
-        slug: query.slug as string,
-        userId: sessionData?.user?.id,
-      });
+      invalidateCurrentPostPage();
     },
   });
 
-  const [openEditImageModal, setOpenEditImageModal] = useState(false);
+  const [showCommentSidebar, setShowCommentSidebar] = useState(false);
 
-  const editBlogImage = () => {
-    setOpenEditImageModal(true);
-  };
-
-  const [openCommentSidebar, setOpenCommentSidebar] = useState(false);
+  const [isUnsplashModalOpen, setIsUnsplashModalOpen] = useState(false);
 
   return (
     <MainLayout>
-      <div className="relative col-span-full mx-auto flex w-full max-w-screen-xl flex-col justify-center p-6">
-        <div className="fixed bottom-5 right-0 left-0 flex w-full items-center justify-center">
-          {blog && (
-            <div className="flex items-center space-x-4 rounded-full border border-gray-300 bg-white px-5 py-2.5 text-gray-600 shadow-xl  transition-all duration-300 hover:border-gray-500 hover:text-gray-900">
-              <div className="flex items-center space-x-1 border-r border-gray-300 pr-4">
-                {(likePost.isLoading || dislikePost.isLoading) && (
-                  <BsThreeDots className="animate-pulse text-2xl text-indigo-600" />
-                )}
+      {getPost.isSuccess && getPost.data && (
+        <UnsplashGallary
+          isUnsplashModalOpen={isUnsplashModalOpen}
+          setIsUnsplashModalOpen={setIsUnsplashModalOpen}
+          postId={getPost.data?.id}
+          slug={getPost.data.slug}
+        />
+      )}
 
-                {!likePost.isLoading &&
-                  !dislikePost.isLoading &&
-                  (isLiked ? (
-                    <FcLike
-                      className="cursor-pointer text-2xl"
-                      onClick={() => dislikePost.mutate({ postId: blog.id })}
-                    />
-                  ) : (
-                    <FcLikePlaceholder
-                      className="cursor-pointer text-2xl"
-                      onClick={() => likePost.mutate({ postId: blog.id })}
-                    />
-                  ))}
-
-                <div className="text-xs">{likesCount}</div>
-              </div>
-              <div className="flex items-center space-x-0.5">
-                <HiOutlineChatBubbleOvalLeft
-                  strokeWidth={1}
-                  className="cursor-pointer text-2xl"
-                  onClick={() => setOpenCommentSidebar(true)}
-                />
-                <div className="text-xs">{blog?._count.comments}</div>
-              </div>
-            </div>
-          )}
+      {getPost.data?.id && (
+        <CommentSidebar
+          showCommentSidebar={showCommentSidebar}
+          setShowCommentSidebar={setShowCommentSidebar}
+          postId={getPost.data?.id}
+        />
+      )}
+      {getPost.isLoading && (
+        <div className="flex h-full w-full items-center justify-center space-x-4">
+          <div>
+            <AiOutlineLoading3Quarters className="animate-spin" />
+          </div>
+          <div>Loading...</div>
         </div>
-        {isSuccess && (
-          <div className="flex flex-col justify-center space-y-4">
-            <div className="relative mb-10 h-[60vh] w-full rounded-3xl bg-gray-300 p-28 shadow-xl">
-              {blog?.featuredImage && (
-                <Image
-                  src={blog?.featuredImage}
-                  alt={blog.title}
-                  fill
-                  className="rounded-3xl object-cover"
+      )}
+      {getPost.isSuccess && (
+        <div className="fixed bottom-10 flex w-full items-center justify-center">
+          <div className="group flex items-center justify-center space-x-4 rounded-full border border-gray-400 bg-white px-6 py-3 shadow-xl transition duration-300 hover:border-gray-900">
+            <div className="border-r pr-4 transition duration-300 group-hover:border-gray-900">
+              {getPost.data?.likes && getPost.data?.likes.length > 0 ? (
+                <FcLike
+                  onClick={() =>
+                    getPost.data?.id &&
+                    dislikePost.mutate({
+                      postId: getPost.data?.id,
+                    })
+                  }
+                  className="cursor-pointer text-xl"
+                />
+              ) : (
+                <FcLikePlaceholder
+                  onClick={() =>
+                    getPost.data?.id &&
+                    likePost.mutate({
+                      postId: getPost.data?.id,
+                    })
+                  }
+                  className="cursor-pointer text-xl"
                 />
               )}
-              <BiEdit
-                onClick={editBlogImage}
-                className="absolute top-5 left-5 z-10 cursor-pointer text-3xl text-gray-500 hover:text-black"
+            </div>
+            <div>
+              <BsChat
+                className="cursor-pointer text-base"
+                onClick={() => setShowCommentSidebar(true)}
               />
-              <div className="absolute inset-0 flex h-full w-full max-w-full items-center justify-center break-words  text-center  font-bold text-white">
-                <span className="rounded-xl bg-black/40 p-4 text-4xl text-white">
-                  {blog?.title}
-                </span>
-              </div>
-            </div>
-            <div className="border-l-4 border-black pl-4 text-sm text-gray-700">
-              {blog?.description}
-            </div>
-            <div className="list-disc text-lg text-gray-700">
-              <Interweave content={blog?.text} />
             </div>
           </div>
-        )}
-      </div>
-      {blog && (
-        <UnsplashGallary
-          openEditImageModal={openEditImageModal}
-          closeModal={() => setOpenEditImageModal(false)}
-          currentPost={blog}
-        />
+        </div>
       )}
+      <div className="flex h-full w-full flex-col items-center justify-center p-10">
+        <div className="flex w-full max-w-screen-lg flex-col space-y-6">
+          <div className="relative h-[60vh] w-full rounded-xl bg-gray-300 shadow-lg">
+            {getPost.isSuccess && getPost.data?.featuredImage && (
+              <Image
+                src={getPost.data?.featuredImage}
+                alt={getPost.data?.title}
+                fill
+                className="rounded-xl"
+              />
+            )}
+            {data?.user?.id === getPost.data?.authorId && (
+              <div
+                onClick={() => setIsUnsplashModalOpen(true)}
+                className="absolute top-2 left-2 z-10 cursor-pointer rounded-md bg-black/30 p-2 text-white hover:bg-black"
+              >
+                <BiImageAdd className="text-2xl" />
+              </div>
+            )}
+            <div className="absolute flex h-full w-full items-center justify-center ">
+              <div className="rounded-xl bg-black bg-opacity-50 p-4 text-3xl text-white">
+                {getPost.data?.title}
+              </div>
+            </div>
+          </div>
+          <div className="border-l-4 border-gray-800 pl-6">
+            {getPost.data?.description}
+          </div>
+          {/* <div>{getPost.data?.text}</div> */}
 
-      {blog && (
-        <CommentsSidebar
-          postId={blog.id}
-          openCommentSidebar={openCommentSidebar}
-          onClose={() => setOpenCommentSidebar(false)}
-          commentsCounts={blog?._count.comments ?? 0}
-          slug={blog.slug}
-        />
-      )}
+          <div className="prose lg:prose-xl">
+            <Interweave content={getPost.data?.html} />
+          </div>
+        </div>
+      </div>
     </MainLayout>
   );
 };
 
-export default BlogPage;
+export default PostPage;

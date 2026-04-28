@@ -1,13 +1,20 @@
 import React from "react";
 import MainSection from "../components/MainSection";
-import MainLayout from "../Layouts/MainLayout";
+import SideSection from "../components/SideSection";
 
-const Home = () => {
+import WriteFormModal from "../components/WriteFormModal";
+import MainLayout from "../layouts/MainLayout";
+
+const HomePage = () => {
   return (
     <MainLayout>
-      <MainSection />
+      <section className="grid grid-cols-12">
+        <MainSection />
+        <SideSection />
+      </section>
+      <WriteFormModal />
     </MainLayout>
   );
 };
 
-export default Home;
+export default HomePage;

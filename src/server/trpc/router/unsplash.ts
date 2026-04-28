@@ -1,29 +1,28 @@
-import { TRPCError } from "@trpc/server";
-import { createApi } from "unsplash-js";
-import { querySchema } from "../../../components/UnsplashGallary";
-import { env } from "../../../env/server.mjs";
+import { router, protectedProcedure } from "../trpc";
 
-import { protectedProcedure, router } from "../trpc";
+import { createApi } from "unsplash-js";
+import { env } from "../../../env/server.mjs";
+import { TRPCError } from "@trpc/server";
+import { unsplashSearchRouteSchema } from "../../../components/UnsplashGallary";
 
 const unsplash = createApi({
-  accessKey: env.UNSPLASH_ACCESS_KEY,
+  accessKey: env.UNSPLASH_API_ACCESS_KEY,
 });
 
 export const unsplashRouter = router({
   getImages: protectedProcedure
-    .input(querySchema)
-    .query(async ({ input: { query } }) => {
+    .input(unsplashSearchRouteSchema)
+    .query(async ({ input: { searchQuery } }) => {
       try {
-        const data = await unsplash.search.getPhotos({
-          query,
-          orderBy: "relevant",
+        const imagesData = await unsplash.search.getPhotos({
+          query: searchQuery,
           orientation: "landscape",
         });
-        return data.response;
+        return imagesData.response;
       } catch (error) {
         throw new TRPCError({
           code: "INTERNAL_SERVER_ERROR",
-          message: "not able to fetch images from unsplash server",
+          message: "unsplash not working",
         });
       }
     }),

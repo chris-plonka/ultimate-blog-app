@@ -1,170 +1,121 @@
-import { zodResolver } from "@hookform/resolvers/zod";
-import type { Post } from "@prisma/client";
-import Image from "next/image";
-import React, { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
-import toast from "react-hot-toast";
-import { BiLoader } from "react-icons/bi";
-import { IoIosArrowRoundBack } from "react-icons/io";
-import { z } from "zod";
+import { zodResolver } from "@hookform/resolvers/zod";
+
+import Image from "next/image";
 import useDebounce from "../../hooks/useDebounce";
 import { trpc } from "../../utils/trpc";
 import Modal from "../Modal";
+import { z } from "zod";
+import { BiLoaderAlt } from "react-icons/bi";
+import { useState } from "react";
+import { toast } from "react-hot-toast";
 
-enum SELECT_FROM {
-  UNSPLASH = "UNSPLASH",
-  LOCAL = "LOCAL",
-}
-
-export const querySchema = z.object({
-  query: z.string().min(5),
+export const unsplashSearchRouteSchema = z.object({
+  searchQuery: z.string().min(5),
 });
 
-type UnsplashGallaryProps = {
-  openEditImageModal: boolean;
-  closeModal: () => void;
-  currentPost: Post;
+type UnsplahGallaryProps = {
+  isUnsplashModalOpen: boolean;
+  setIsUnsplashModalOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  postId: string;
+  slug: string;
 };
 
-const UnsplashGallary = ({
-  openEditImageModal,
-  closeModal,
-  currentPost,
-}: UnsplashGallaryProps) => {
-  const [selectImageOption, setSelectImageOption] =
-    useState<SELECT_FROM | null>(null);
-  const [showUnsplashGallary, setShowUnsplashGallary] = useState(false);
-
-  const [selectedImageUrl, setSelectedImageUrl] = useState("");
-
-  useEffect(() => {
-    if (selectImageOption === SELECT_FROM.UNSPLASH) {
-      setShowUnsplashGallary(true);
-    }
-  }, [selectImageOption]);
-
-  const { register, watch } = useForm<{ query: string }>({
-    resolver: zodResolver(querySchema),
+const UnsplahGallary = ({
+  isUnsplashModalOpen,
+  setIsUnsplashModalOpen,
+  postId,
+  slug,
+}: UnsplahGallaryProps) => {
+  const { register, watch, reset } = useForm<{ searchQuery: string }>({
+    resolver: zodResolver(unsplashSearchRouteSchema),
   });
 
-  const watchQuery = watch("query");
-  const debouncedSearch = useDebounce(watchQuery, 1500);
+  const watchSearchQuery = watch("searchQuery");
+  const debouncedSearchQuery = useDebounce(watchSearchQuery, 3000);
 
-  const { data, isLoading: isGallaryLoading } =
-    trpc.unsplash.getImages.useQuery(
-      { query: debouncedSearch },
-      {
-        enabled: !!debouncedSearch,
-      }
-    );
+  const [selectedImage, setSelectedImage] = useState("");
 
-  const trpcUtils = trpc.useContext();
+  const fetchUnsplashImages = trpc.unsplash.getImages.useQuery(
+    {
+      searchQuery: debouncedSearchQuery,
+    },
+    {
+      enabled: Boolean(debouncedSearchQuery),
+    }
+  );
 
-  const { mutate, isLoading: isUpdatePostLoading } =
-    trpc.post.updatePost.useMutation({
-      onSuccess() {
-        trpcUtils.post.getPost
-          .invalidate({ slug: currentPost.slug })
-          .then(() => {
-            closeModal();
-            toast.success("successfully updated featured image 🥳");
-          })
-          .catch(() => {
-            toast.error("oh no, something went wrong ☹️");
-          })
-          .finally(() => {
-            setSelectedImageUrl("");
-          });
-      },
-    });
+  const utils = trpc.useContext();
 
-  const handleConfirmImage = () => {
-    mutate({
-      postId: currentPost.id,
-      featuredImage: selectedImageUrl,
-    });
-  };
+  const updateFeaturedImage = trpc.post.updatePostFeaturedImage.useMutation({
+    onSuccess: () => {
+      utils.post.getPost.invalidate({ slug });
+      reset();
+      setIsUnsplashModalOpen(false);
+      toast.success("featured image updated");
+    },
+  });
 
   return (
-    <div>
-      <Modal isOpen={openEditImageModal} onClose={closeModal}>
-        <div className="relative">
-          {showUnsplashGallary && (
-            <div
-              onClick={() => {
-                setSelectImageOption(null);
-              }}
-              className="w-max cursor-pointer text-4xl text-gray-500 hover:text-gray-900"
-            >
-              <IoIosArrowRoundBack />
-            </div>
-          )}
-          {!Boolean(selectImageOption) && (
-            <div className="my-10 flex w-full flex-row justify-center space-x-10 transition-all">
+    <Modal
+      isOpen={isUnsplashModalOpen}
+      onClose={() => setIsUnsplashModalOpen(false)}
+    >
+      <div className="flex w-full flex-col  items-center justify-center space-y-4">
+        <input
+          type="text"
+          id="search"
+          {...register("searchQuery")}
+          className="h-full w-full rounded-xl border border-gray-300 p-4 outline-none focus:border-gray-600"
+        />
+        {debouncedSearchQuery && fetchUnsplashImages.isLoading && (
+          <div className="flex h-full w-full items-center justify-center">
+            <BiLoaderAlt className="animate-spin" />
+          </div>
+        )}
+        <div className="relative grid h-96 w-full grid-cols-3 place-items-center gap-4 overflow-y-scroll">
+          {fetchUnsplashImages.isSuccess &&
+            fetchUnsplashImages.data?.results.map((imageData) => (
               <div
-                className="w-max transform cursor-pointer whitespace-nowrap rounded-lg bg-gradient-to-br from-gray-200 via-gray-200/50 to-gray-300 p-4 text-lg font-medium text-gray-900/60 ring-1 ring-gray-300   delay-150 duration-300 ease-in-out hover:-translate-y-1 hover:scale-110 hover:bg-gradient-to-tl hover:text-black hover:shadow-xl"
-                onClick={() => setSelectImageOption(SELECT_FROM.UNSPLASH)}
+                key={imageData.id}
+                className="group relative aspect-video h-full w-full cursor-pointer rounded-md"
+                onClick={() => setSelectedImage(imageData.urls.full)}
               >
-                Choose Image from Unsplash
+                <div
+                  className={`absolute rounded-md group-hover:bg-black/40 ${
+                    selectedImage === imageData.urls.full && "bg-black/40"
+                  } inset-0 z-10 h-full w-full`}
+                />
+                <Image
+                  src={imageData.urls.regular}
+                  alt={imageData.alt_description ?? ""}
+                  fill
+                  sizes="(max-width: 768px) 100vw,
+              (max-width: 1200px) 50vw,
+              33vw"
+                  className="rounded-md"
+                />
               </div>
-              <div className="w-max transform cursor-pointer whitespace-nowrap rounded-lg bg-gradient-to-br from-gray-200 via-gray-200/50 to-gray-300 p-4 text-lg font-medium text-gray-900/60 ring-1 ring-gray-300   delay-150 duration-300 ease-in-out hover:-translate-y-1 hover:scale-110 hover:bg-gradient-to-tl hover:text-black hover:shadow-xl">
-                Select from your Computer
-              </div>
-            </div>
-          )}
-
-          {showUnsplashGallary &&
-            selectImageOption === SELECT_FROM.UNSPLASH && (
-              <div className="flex max-h-[60vh] flex-col space-y-4 p-5">
-                <div>
-                  <input
-                    type="text"
-                    id="search"
-                    className="w-full rounded-lg border bg-gray-50 p-4 outline-none focus:border-gray-600"
-                    {...register("query")}
-                  />
-                </div>
-                <div className="grid grid-cols-3 place-items-center gap-4 overflow-y-auto">
-                  {isGallaryLoading && (
-                    <div className="col-span-full flex h-80 w-full animate-pulse items-center justify-center rounded-xl bg-gradient-to-tr from-slate-100 via-gray-200 to-neutral-300 p-4">
-                      <BiLoader className="h-10 w-10 animate-spin text-black" />
-                    </div>
-                  )}
-                  {data?.results.map((photo) => (
-                    <div key={photo.id} className="relative">
-                      <Image
-                        src={photo.urls.small}
-                        alt={photo.alt_description ?? photo.description ?? ""}
-                        width={photo.width}
-                        height={photo.height}
-                      />
-                      <div
-                        onClick={() => setSelectedImageUrl(photo.urls.full)}
-                        className={`absolute inset-0 h-full w-full cursor-pointer hover:bg-black/20
-                          ${
-                            selectedImageUrl === photo.urls.full &&
-                            "bg-black/40"
-                          }
-                        `}
-                      />
-                    </div>
-                  ))}
-                </div>
-                {selectedImageUrl && (
-                  <button
-                    onClick={handleConfirmImage}
-                    disabled={isUpdatePostLoading}
-                    className="flex w-full transform items-center justify-center space-x-2 rounded-lg border bg-white p-5 px-4 py-2 transition hover:bg-black/10 active:scale-95"
-                  >
-                    {isUpdatePostLoading ? "Loading..." : "Confirm"}
-                  </button>
-                )}
-              </div>
-            )}
+            ))}
         </div>
-      </Modal>
-    </div>
+        {selectedImage && (
+          <button
+            type="submit"
+            className="flex items-center space-x-3 rounded border border-gray-200 px-4 py-2 transition hover:border-gray-900 hover:text-gray-900"
+            onClick={() => {
+              updateFeaturedImage.mutate({
+                imageUrl: selectedImage,
+                postId,
+              });
+            }}
+            disabled={updateFeaturedImage.isLoading}
+          >
+            {updateFeaturedImage.isLoading ? "Loading..." : "Confirm"}
+          </button>
+        )}
+      </div>
+    </Modal>
   );
 };
 
-export default UnsplashGallary;
+export default UnsplahGallary;

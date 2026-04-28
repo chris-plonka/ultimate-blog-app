@@ -1,36 +1,39 @@
 import { TRPCError } from "@trpc/server";
 import slugify from "slugify";
-import { tagSchema } from "../../../components/TagModal";
-import { protectedProcedure, publicProcedure, router } from "../trpc";
+import { z } from "zod";
+import { tagCreateSchema } from "../../../components/TagForm";
+
+import { protectedProcedure, router } from "../trpc";
 
 export const tagRouter = router({
-  createTag: protectedProcedure
-    .input(tagSchema)
-    .mutation(async ({ ctx: { prisma }, input: { name, description } }) => {
-      const slug = slugify(name);
+  createTag: protectedProcedure.input(tagCreateSchema).mutation(
+    // we need to define some validations over here!
 
-      const existingTag = await prisma.tag.findUnique({
+    async ({ ctx: { prisma }, input }) => {
+      // validation
+      const tag = await prisma.tag.findUnique({
         where: {
-          name: name,
+          name: input.name,
         },
       });
 
-      if (existingTag) {
+      if (tag) {
         throw new TRPCError({
           code: "CONFLICT",
-          message: "tag name already exists!",
+          message: "tag already exists!",
         });
       }
 
       await prisma.tag.create({
         data: {
-          name,
-          description,
-          slug,
+          ...input,
+          slug: slugify(input.name),
         },
       });
-    }),
-  getTags: publicProcedure.query(async ({ ctx: { prisma } }) => {
+    }
+  ),
+
+  getTags: protectedProcedure.query(async ({ ctx: { prisma } }) => {
     return await prisma.tag.findMany();
   }),
 });

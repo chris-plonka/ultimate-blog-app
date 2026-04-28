@@ -5,7 +5,7 @@ import { PrismaAdapter } from "@next-auth/prisma-adapter";
 
 import { env } from "../../../env/server.mjs";
 import { prisma } from "../../../server/db/client";
-import { getUsername } from "../../../utils/getUsername";
+import { generateUsername } from "../../../utils/generateUsername";
 
 export const authOptions: NextAuthOptions = {
   // Include user.id on session
@@ -13,28 +13,27 @@ export const authOptions: NextAuthOptions = {
     session({ session, user }) {
       if (session.user) {
         session.user.id = user.id;
-        session.user.username = user.username;
       }
       return session;
     },
   },
+  // Configure one or more authentication providers
   adapter: PrismaAdapter(prisma),
   providers: [
     GoogleProvider({
       clientId: env.GOOGLE_CLIENT_ID,
       clientSecret: env.GOOGLE_CLIENT_SECRET,
       profile(profile) {
-        const givenName = profile.given_name ?? "" + profile.family_name ?? "";
-        const username = getUsername(givenName);
         return {
           id: profile.sub,
-          image: profile.picture,
-          name: givenName,
+          name: profile.name,
           email: profile.email,
-          username,
+          image: profile.picture,
+          username: generateUsername(profile.name),
         };
       },
     }),
+    // ...add more providers here
   ],
 };
 
