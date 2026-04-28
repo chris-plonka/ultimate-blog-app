@@ -1,138 +1,137 @@
-import React, { Fragment } from "react";
-import { Dialog, Transition } from "@headlessui/react";
-import { HiXMark } from "react-icons/hi2";
-import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
+import dayjs from "dayjs";
+import React from "react";
+import { useForm } from "react-hook-form";
+import { HiXMark } from "react-icons/hi2";
 import { z } from "zod";
 import { trpc } from "../../utils/trpc";
-import { toast } from "react-hot-toast";
+import AnimatedSidebar from "../AnimatedSidebar";
+import Avatar from "../Avatar";
 
-import dayjs from "dayjs";
 import relativeTime from "dayjs/plugin/relativeTime";
+import { useSession } from "next-auth/react";
 dayjs.extend(relativeTime);
 
-type CommentSidebarProps = {
-  showCommentSidebar: boolean;
-  setShowCommentSidebar: React.Dispatch<React.SetStateAction<boolean>>;
+type CommentsSidebarProps = {
+  openCommentSidebar: boolean;
+  onClose: () => void;
+  commentsCounts: number;
   postId: string;
+  slug: string;
 };
 
-type CommentFormType = { text: string };
+type commentType = {
+  text: string;
+};
 
-export const commentFormSchema = z.object({
-  text: z.string().min(3),
+const commentSchema = z.object({
+  text: z.string().min(5),
 });
 
-const CommentSidebar = ({
-  showCommentSidebar,
-  setShowCommentSidebar,
+const CommentsSidebar = ({
+  openCommentSidebar,
+  onClose,
+  commentsCounts,
   postId,
-}: CommentSidebarProps) => {
+  slug,
+}: CommentsSidebarProps) => {
   const {
     register,
     handleSubmit,
     formState: { isValid },
     reset,
-  } = useForm<CommentFormType>({
-    resolver: zodResolver(commentFormSchema),
+  } = useForm<commentType>({
+    resolver: zodResolver(commentSchema),
   });
 
-  const postRoute = trpc.useContext().post;
+  const utils = trpc.useContext();
+  const comments = trpc.comment.getComments.useQuery({ postId });
 
-  const submitComment = trpc.post.submitComment.useMutation({
+  const { data: userSession } = useSession();
+
+  const createComment = trpc.comment.createComment.useMutation({
     onSuccess: () => {
-      toast.success("🥳");
-      postRoute.getComments.invalidate({
-        postId,
-      });
-      reset();
+      utils.comment.getComments.invalidate({ postId }), reset();
+      utils.post.getPost.invalidate({ userId: userSession?.user?.id, slug });
     },
-    onError: (error) => {
-      toast.error(error.message);
-    },
-  });
-
-  const getComments = trpc.post.getComments.useQuery({
-    postId,
   });
 
   return (
-    <Transition.Root show={showCommentSidebar} as={Fragment}>
-      <Dialog as="div" onClose={() => setShowCommentSidebar(false)}>
-        <div className="fixed right-0 top-0">
-          <Transition.Child
-            enter="transition duration-1000"
-            leave="transition duration-500"
-            enterFrom="translate-x-full"
-            enterTo="translate-x-0"
-            leaveFrom="translate-x-0"
-            leaveTo="translate-x-full"
+    <AnimatedSidebar
+      side="right"
+      toggleSidebar={openCommentSidebar}
+      onClose={onClose}
+    >
+      <div className="flex h-full w-full justify-end">
+        <div className="relative flex h-screen max-h-screen w-full max-w-md flex-col rounded-xl bg-white p-10">
+          <div className="my-2 flex items-center justify-between text-xl">
+            <h2 className=" text-black">Responses ({commentsCounts})</h2>
+            <HiXMark
+              onClick={onClose}
+              className="cursor-pointer transition-all duration-300 hover:text-gray-900"
+            />
+          </div>
+          <form
+            action=""
+            onSubmit={handleSubmit((data) => {
+              createComment.mutate({
+                ...data,
+                postId,
+              });
+            })}
+            className="transition-all duration-300"
           >
-            <Dialog.Panel className="relative h-screen w-[200px] bg-white shadow-md sm:w-[400px]">
-              <div className=" flex h-full w-full flex-col overflow-scroll px-6">
-                <div className="mt-10 mb-5 flex items-center justify-between  text-xl">
-                  <h2 className=" font-medium">Responses (4)</h2>
+            <div className="my-4">
+              <textarea
+                id="comment"
+                placeholder="What are your thoughts?"
+                className="w-full rounded-lg border p-4 shadow-md outline-none placeholder:text-sm focus:border-gray-600"
+                {...register("text")}
+                rows={2}
+                disabled={createComment.isLoading}
+              />
+            </div>
+            <div className="flex w-full justify-end">
+              {isValid && (
+                <button
+                  type="submit"
+                  className="flex items-center space-x-2 rounded-lg px-4 py-2 ring-1 ring-gray-400"
+                >
+                  {createComment.isLoading ? "Loading..." : "Comment"}
+                </button>
+              )}
+            </div>
+          </form>
+          <div className="mt-10 flex flex-col space-y-8 overflow-y-auto">
+            {comments.data &&
+              comments.data.map((comment) => (
+                <div
+                  key={comment.id}
+                  className="flex flex-col justify-center space-y-3 border-b border-b-gray-200 pb-8 last:border-none"
+                >
+                  <div className="flex items-center space-x-2">
+                    <div className="h-10 w-10">
+                      <Avatar size="full" url={comment.user.image} />
+                    </div>
+                    <div>
+                      <p className="text-base text-gray-900">
+                        {comment.user.name}
+                      </p>
+                      <p className="text-xs text-gray-500">
+                        {dayjs(comment.createdAt).fromNow()}
+                      </p>
+                    </div>
+                  </div>
                   <div>
-                    <HiXMark
-                      className="cursor-pointer"
-                      onClick={() => setShowCommentSidebar(false)}
-                    />
+                    <p className="text-sm text-gray-900">{comment.text}</p>
                   </div>
                 </div>
-
-                <form
-                  onSubmit={handleSubmit((data) => {
-                    submitComment.mutate({
-                      ...data,
-                      postId,
-                    });
-                  })}
-                  className="my-6 flex flex-col items-end space-y-5"
-                >
-                  <textarea
-                    id="comment"
-                    rows={3}
-                    className="w-full rounded-xl border border-gray-300 p-4 shadow-lg outline-none focus:border-gray-600"
-                    placeholder="What are your thoughts?"
-                    {...register("text")}
-                  />
-                  {isValid && (
-                    <button
-                      type="submit"
-                      className="flex items-center space-x-3 rounded border border-gray-300 px-4 py-2 transition hover:border-gray-900 hover:text-gray-900"
-                    >
-                      Comment
-                    </button>
-                  )}
-                </form>
-
-                <div className="flex flex-col items-center justify-center space-y-6">
-                  {getComments.isSuccess &&
-                    getComments.data.map((comment) => (
-                      <div
-                        className="flex w-full flex-col space-y-2 border-b border-b-gray-300 pb-4 last:border-none"
-                        key={comment.id}
-                      >
-                        <div className="flex w-full items-center space-x-2 text-xs">
-                          <div className="relative h-8 w-8 rounded-full bg-gray-400"></div>
-                          <div>
-                            <p className="font-semibold">{comment.user.name}</p>
-                            <p>{dayjs(comment.createdAt).fromNow()}</p>
-                          </div>
-                        </div>
-                        <div className="text-sm text-gray-600">
-                          {comment.text}
-                        </div>
-                      </div>
-                    ))}
-                </div>
-              </div>
-            </Dialog.Panel>
-          </Transition.Child>
+              ))}
+          </div>
         </div>
-      </Dialog>
-    </Transition.Root>
+      </div>
+    </AnimatedSidebar>
   );
 };
 
-export default CommentSidebar;
+export default CommentsSidebar;
