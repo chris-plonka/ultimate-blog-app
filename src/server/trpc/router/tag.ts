@@ -1,6 +1,6 @@
 import { TRPCError } from "@trpc/server";
 import slugify from "slugify";
-
+import { z } from "zod";
 import { tagCreateSchema } from "../../../components/TagForm";
 
 import { protectedProcedure, router } from "../trpc";
