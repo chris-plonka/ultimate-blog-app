@@ -20,6 +20,14 @@ const config = {
       "images.unsplash.com",
       "source.unsplash.com",
     ],
-  },
-};
+    remotePatterns: [
+      {
+        protocol: 'https',
+        hostname: 'res.cloudinary.com',
+        pathname: '**',
+      },
+    ]
+  }
+  };
+
 export default config;
