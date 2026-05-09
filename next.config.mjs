@@ -15,6 +15,7 @@ const config = {
   },
   images: {
     domains: [
+"lh3.googleusercontent.com",
       "gymzplbyrknizeycdzft.supabase.co",
       "images.unsplash.com",
       "source.unsplash.com",
