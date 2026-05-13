@@ -210,7 +210,7 @@ const UserProfilePage = () => {
                     </label>
                   )}
                   {!objectImage && userProfile.data?.image && (
-                    <Image
+                    <img
                       src={userProfile.data?.image}
                       alt={userProfile.data?.name ?? ""}
                       className="h-full w-full rounded-full"
